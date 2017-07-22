@@ -16,14 +16,28 @@ var domain = 'sandbox292f29193e934d1d817a0a7d1a9f4174.mailgun.org';
 var mailgun = require('mailgun-js')({apiKey: api_key, domain: domain});
 
 
+var FROM = 'Vit-elec <postmaster@sandbox292f29193e934d1d817a0a7d1a9f4174.mailgun.org>';
+
+var createAttachmentFromBase64 = function (filename, b64) {
+    if (!filename || !b64)
+    {
+        return;
+    }
+    var pos = b64.indexOf('base64,');
+    if (pos !== -1)
+    {
+        b64 = b64.substr(pos + 7);
+    }
+    var buf = new Buffer(b64, 'base64');
+
+    var mailgunAttach = new mailgun.Attachment({data: buf, filename: filename});
+
+    return mailgunAttach;
+};
 
 
-
-// this code is executed every 15 seconds and fetches the latest "authenticationEmail" objects from couchdb and then sends an email to the user with a temporary password and changes his password
-// in couchdbs _user database and in remotedb (for offline login). The "authenticationEmail" object is then deleted.
-setInterval(function(){
-     console.log("Hello"); 
-remoteDb.createIndex({
+var fetchAuthenticationEmail = function() {
+  remoteDb.createIndex({
   index: {
     fields: ["type"]
   }
@@ -40,7 +54,7 @@ remoteDb.createIndex({
           changePassword(emailObject.docs[i], generator.generate({length: 5, numbers: true}), function(password){      
           var recipient = 'florian.schustek@supelec.fr';
           var data = {
-            from: 'Vit-elec <postmaster@sandbox292f29193e934d1d817a0a7d1a9f4174.mailgun.org>',
+            from: FROM,
             to: recipient,
             subject: 'Identifiants',
             text: "Bonjour, un compte vous a été créé, votre identifiant est "+recipient+".\n Votre mot de passe par défaut est: "+password+", veillez à le changer"
@@ -61,7 +75,60 @@ remoteDb.createIndex({
           console.log("error3")
       console.log(err);
       });
-});    
+  });  
+};
+
+var fetchEstimateEmail = function() {
+  remoteDb.createIndex({
+  index: {
+    fields: ["type"]
+  }
+}).then(function () {
+    console.log("HERE");
+  return remoteDb.find({
+    selector: {type: "estimateEmail"}
+  }).then(function (emailObject) {
+        
+        for (i in emailObject.docs){
+          remoteDb.find({
+            selector: {_id: emailObject.docs[i].estimateId}
+          }).then(function (estimateData) {
+              var estimate = estimateData.docs[0];
+
+              var recipient = estimate.mail;
+              var data = {
+                from: FROM,
+                to: recipient,
+                subject: 'Devis VitElec',
+                text: 'Bonjour, un devis Vit Elec vous a été envoyé. Retrouvez le en pièce jointe.',
+                attachment: createAttachmentFromBase64('Devis.pdf', estimate.pdf)
+              };console.log(data);
+              mailgun.messages().send(data, function (error, body) {console.log(error, body);
+              if(error)
+              {
+              console.log(error);
+            }});
+            
+              remoteDb.remove(emailObject.docs[i]);
+          });
+
+        }
+        
+      }).catch(function (err) {
+          console.log("inside err")
+          console.log("error3")
+      console.log(err);
+      });
+  });  
+};
+
+
+// this code is executed every 15 seconds and fetches the latest "authenticationEmail" objects from couchdb and then sends an email to the user with a temporary password and changes his password
+// in couchdbs _user database and in remotedb (for offline login). The "authenticationEmail" object is then deleted.
+setInterval(function(){
+     console.log("Hello"); 
+     fetchAuthenticationEmail();
+     fetchEstimateEmail();
 }, 1500);
 
 
